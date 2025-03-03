@@ -16,7 +16,7 @@ public class Generator
 	public String[] predTypes = {"weasel"};
 	public String[] pathTypes = {"dev","off","weasel","dirt","wooden"};
 	public String[] stats = {"mood","hunger","fatigue"};
-	public String[] rNodeTypes = {"tree","branch","grass patch","stones","hollow log"};
+	public String[] rNodeTypes = {"tree","branch","grass patch","stones","hollow log","berry bush"};
 	ArrayList<String> names = new ArrayList<String>();
 	
 	private int DELETE=0;
@@ -32,6 +32,7 @@ public class Generator
 		String atype = "civl";
 		String name = null;
 		int speed = 12;
+		float sight = 20f;
 		HashMap<Integer,List<String>> pref = new HashMap<>();
 		//Agent prefrences, 1=loves, 2=likes, 3=neutral, 4=dislikes, 5=hates
 		for(int i=1;i<=5;i++)
@@ -57,9 +58,10 @@ public class Generator
 		
 		case "weasel":
 			name = namegen.generateNames(1,"nouns",new int[]{1000});
-			speed=12;
+			speed=6;
 			species="weasel";
 			atype="pred";
+			sight = 90f;
 		break;
 		
 		default:
@@ -70,7 +72,7 @@ public class Generator
 		
 		Data agent = new Data("Name: ",name,"Hunger: ",0,"Mood: ",100,"position",pos,"species",species,"atype",atype,"remainingpath",new ArrayList<Data>(),
 				"Has: ",has,"Speed: ",speed,"Effects: ",effects,"speed_left",speed_left,"processed_turn",false,"fatigue",0,"pref",pref,
-				"state",state,"type",type,"storagespots",storagespots,"inbuilding",false,"hunting",null);
+				"state",state,"type",type,"storagespots",storagespots,"inbuilding",false,"hunting",null,"preypos",null,"sight",sight,"timeinstate",0);
 		names.add(name);
 		return agent;
 	}
@@ -148,7 +150,7 @@ public class Generator
 	}
 	
 	public String[] buildingTypes = {"building test","cutter pile","stone pile","stonechip pile","rootcut pile","grass pile","wood pile","berry pile","seed pile","mushroom pile","chippery","cuttery",
-			"grass workspot","offpoint","cutter maker","research spot","stones workspot"};
+			"grass workspot","berry catcher","offpoint","cutter maker","research spot","stones workspot"};
 	
 	public Data makeBuilding(String type)
 	{
@@ -187,6 +189,35 @@ public class Generator
 			
 			break;
 			
+		case "berry catcher":
+			level=0;
+			workSpeed=ws;
+			maxworkers = 2;
+			improves="berry bush";
+			capacity.put("berry", 16);
+			
+			techreq.add("basic");
+			recipes.add(new Data(
+					"type","catch",
+					"name","Berry Catching",
+					"workspeed",12,
+					"techreq",new ArrayList<>(List.of("basic")),
+					"productamt",new ArrayList<>(List.of(1)),
+					"uses",new ArrayList<>(),
+					"useamt",new ArrayList<>(),
+					"products",new ArrayList<>(List.of(new Data(
+							"type","berry-catching",
+							"istoken",true,
+							"isyeild",true,
+							"yeildtype","berry",
+							"yeildamt",1,
+							"threshold",4
+							))),
+					"isharvest",true
+							));
+		break;
+		
+		
 		case "chippery":
 			level=0;
 			workSpeed=ws;
@@ -207,7 +238,7 @@ public class Generator
 			maxworkers = 2;
 			improves="stones";
 			capacity.put("cutters", 7);
-			capacity.put("stonechip", 7);
+			capacity.put("stone", 4);
 			
 			techreq.add("basic");
 			recipes.add(new Data(
@@ -427,54 +458,12 @@ public class Generator
 			capacity.put("offpoint-model", 1);   capacity.put("stonechip", 12);  capacity.put("rootcut", 12);
 			capacity.put("test-progress", 3); 
 			
-			capacity.put("support", 9);
-			capacity.put("sap clump", 5);
-			capacity.put("pebble", 2);
-			capacity.put("root", 20);
-			capacity.put("joy", 50);
+			capacity.put("wood", 9);
 			
 			techreq.add("basic");
 			
 			recipes.add(recipe("none"));
 								
-			recipes.add(new Data(
-			"type","support",
-			"name","Support Making",
-			"workspeed",6,
-			"techreq",new ArrayList<>(List.of("basic")),
-			"productamt",new ArrayList<>(List.of(1)),
-			"uses",new ArrayList<>(),
-			"useamt",new ArrayList<>(),
-			"products",new ArrayList<>(List.of(new Data(
-				"type","support"))
-					)));
-			
-			recipes.add(new Data(
-					"type","sapclump",
-					"name","Sapclump Making",
-					"workspeed",6,
-					"techreq",new ArrayList<>(List.of("basic")),
-					"productamt",new ArrayList<>(List.of(1)),
-					"uses",new ArrayList<>(),
-					"useamt",new ArrayList<>(),
-					"products",new ArrayList<>(List.of(new Data(
-						"type","sapclump"))
-							)));
-					
-			
-			recipes.add(new Data(
-					"type","pebble",
-					"name","Pebble Harvesting",
-					"workspeed",6,
-					"techreq",new ArrayList<>(List.of("basic")),
-					"productamt",new ArrayList<>(List.of(1)),
-					"uses",new ArrayList<>(),
-					"useamt",new ArrayList<>(),
-					"products",new ArrayList<>(List.of(new Data(
-						"type","pebble"))
-							)));
-					
-			
 			recipes.add(new Data(
 			"type","test",
 			"name","Test Recipe",
@@ -834,34 +823,40 @@ public class Generator
 		ArrayList<Data> storagespots = new ArrayList<>();
 		HashMap<String,Integer> has = new HashMap<>();
 		boolean nestable = false;
+		String category = null;
 		switch(type)
 		{
 		case "branch":
-
+			category = "treefall";
 		break;
 		
 		case "stones":
-
+			category = "common";
 		break;
 		
 		case "grass patch":
-
+			category = "common";
 		break;
 		
 		case "tree":
-			
+			category = "tree";
 		break;
 		
 		case "hollow log":
+			category = "nest";
 			nestable=true;
+		break;
+		
+		case "berry bush":
+			category = "forage";
 		break;
 		
 		default:
 			System.out.println("[GRN] Invalid resourceNode type");
 		break;
 		}
-		return new Data("type",type,"improved",false,"position",position,"buildings",buildings,"snapspots",snapspots,"storagespots",storagespots,"has",has,
-				"nestable",nestable,"nestfor",null) ;
+		return new Data("type",type,"improved",false,"category",category,"position",position,"buildings",buildings,"snapspots",snapspots,"storagespots",storagespots,"has",has,
+				"nestable",nestable,"nestfor",null,"connectcap",0) ;
 	}
 	
 

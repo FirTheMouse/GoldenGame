@@ -51,6 +51,7 @@ public class Simulation
 		
 		techs.add("basic");
 		techs.add("cutters");
+		techs.add("foraging");
 		
 	}
 	
@@ -171,7 +172,7 @@ public class Simulation
         a.setPosition(new Vector3f(
             r.nextFloat(-5f,5f),
             0,                      
-            r.nextFloat(-5f,5f)
+            r.nextFloat(15f,25f)
         ));
         a.addNote("works at", g.makeBuilding("road"));
         store("agents", a);
@@ -625,28 +626,46 @@ public class Simulation
 			List<Data> viablePrey = findPrey(agent);
 			if(!viablePrey.isEmpty())
 			{
-			Data chosen = viablePrey.get(r.nextInt(viablePrey.size()));
-			agent.setNote("hunting", chosen);
-			agent.setNote("preypos", chosen.getPosition());
-			agent.setNote("state", "hunting");
+			Data chosen = null;
+			float bestDistance = 99999;
+			for(Data potential : viablePrey)
+			{
+				float distance = potential.getPosition().distance(agent.getPosition());
+				if(distance<bestDistance)
+				{
+					bestDistance=distance;
+					chosen = potential;
+				}
+			}
+			if(chosen!=null)
+				{
+				agent.setNote("hunting", chosen);
+				agent.setNote("preypos", chosen.getPosition());
+				setState(agent,"hunting");
+				}
 			}
 			else
 			{
-			agent.setNote("state", "searching");
+			setState(agent,"searching");
 			return;
 			}
 		}
 		
+		if(agent.getNote("state", S).equals("hunting"))
+		{
 		Data prey = agent.getNote("hunting", D);
+		agent.setNote("preypos", prey.getPosition());
+		
+		//Catching the prey
 		if(agent.getbBox().intersects(prey.getbBox()))
 		{
-			agent.setNote("state","returning");
+			setState(agent,"returning");
 			prey.setNote("speed",0);
 			prey.getNote("spatial", N).setCullHint(CullHint.Always);
 			agent.getNote("has", DH).put("mouse", 1);
 		}
-		//agent.setNote("status", "hunting");
 		movePredetor(agent,prey);
+		}
 	  }
   
 	private List<Data> findPrey(Data pred)
@@ -656,7 +675,7 @@ public class Simulation
 		{
 			if(prey.getNote("species", S).equals("mouse"))
 			{
-				if(net.checkPath(pred.getPosition(), prey.getPosition()))
+				if(!net.checkPath(pred.getPosition(), prey.getPosition())&&pred.getPosition().distance(prey.getPosition())<pred.getNote("sight", L))
 				viablePrey.add(prey);
 			}
 		}
@@ -674,9 +693,11 @@ public class Simulation
 	    }
 	    
 		Vector3f agentPos = agent.getPosition();
-		Vector3f targetPos = target.getPosition();
-		if(agent.getNote("state", S).equals("returning"))
+		Vector3f targetPos = agent.getNote("preypos",V3);
+		String state = agent.getNote("state", S);
+		switch(state)
 		{
+		case "returning":
 			if(agent.getPosition().distance(agent.getNote("nest", D).getPosition())<1f)
 			{
 	    		trashCan.add(target);
@@ -689,12 +710,30 @@ public class Simulation
 				List<Data> path = net.createPath(agentPos, agent.getNote("nest", D).getPosition(), agent.getNote("species", S));
 				agent.setNote("remainingpath", path);
 			}
+		break;
+			
+		case "hunting":
+		    List<Data> path = net.createPath(agentPos, targetPos, agent.getNote("species", S));
+		    agent.setNote("remainingpath", path);	
+		break;
+		
+		case "searching":
+		    List<Data> patrol = net.createPath(agentPos, targetPos, agent.getNote("species", S));
+		    agent.setNote("remainingpath", patrol);	
+		break;
+			
+		default:
+			System.out.println("[MV] Invalid predetor state!");
+		break;
 		}
-		else
-		{
-	    List<Data> path = net.createPath(agentPos, targetPos, agent.getNote("species", S));
-	    agent.setNote("remainingpath", path);	
-		}
+	}
+	
+	public void setState(Data entity, String state)
+	{
+		String oldState = entity.getNote("state", S);
+		if(state.equals(oldState)) entity.setNote("timeinstate",entity.getNote("timeinstate",I)+1);
+		else entity.setNote("timeinstate",0);
+		entity.setNote("state", state);
 	}
 
 

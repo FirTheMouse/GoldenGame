@@ -224,57 +224,56 @@ public class TransportNetwork {
 
     public List<Data> createPath(Vector3f start, Vector3f end, String pathType) {
         List<Data> pathNodes = new ArrayList<>();
-        Data path = pathMap.get(pathType);
-        float spacing = path.getNote("spacing", L);
+        List<Vector3f> waypoints = new ArrayList<>();
+        float spacing = pathMap.get(pathType).getNote("spacing",L);
+        waypoints.add(start);
         
-        System.out.println(" [CP] Creating new pathway "+start+" to "+end+" of "+pathType);
+        // Use an iterative approach to find waypoints around obstacles
+        Vector3f current = start;
+        int maxAttempts = 50; // Prevent infinite loops
+        int attempts = 0;
         
-        // Calculate nodes needed based on distance
-        float distance = start.distance(end);
-        int nodeCount = Math.max((int)(distance / spacing) + 1, 2); // At least 2 nodes
-        
-        // Create nodes along the line
-        if (nodeCount == 2) {
-        	System.out.println("	[1]");
-        	if (col.checkPath(start, end)) {
-                  // Find a clear detour point
-        			System.out.println("	[CP] Path not clear");
-                  Vector3f detourPoint = col.findClearPath(start, end);
-                  // Create path through detour
-                  System.out.println("[CP] Creating path to detour point");
-                  pathNodes.addAll(createPath(start, detourPoint, "off"));
-                  System.out.println("[CP] Creating approach path");
-                  pathNodes.addAll(createPath(detourPoint, end, pathType));
-                  return pathNodes;
-              }
-            Data nodeStart = createTempNode(start, pathType);
-            Data nodeEnd = createTempNode(end, pathType);
-            pathNodes.add(nodeStart);
-            pathNodes.add(nodeEnd);
-            connectNodes(nodeStart, nodeEnd);
-        } else {
-        	System.out.println("	[2]");
-            // Create evenly spaced nodes
-            for (int i = 0; i < nodeCount; i++) {
-                float progress = i / (float)(nodeCount - 1);
-                Vector3f pos = start.clone().interpolateLocal(end, progress);
-                if (col.checkPath(pos, pos.clone().interpolateLocal(end, progress))) {
-                    pos = col.findClearPath(
-                        pathNodes.isEmpty() ? end : pathNodes.get(pathNodes.size()-1).getPosition(),
-                        pos
-                    );
+        while (current.distance(end) > spacing && attempts < maxAttempts) {
+            Vector3f direction = end.subtract(current).normalizeLocal();
+            Vector3f nextPoint = current.add(direction.mult(spacing));
+            
+            if (col.checkPath(current, nextPoint)) {
+                // Find a detour point
+                Vector3f detour = col.findClearPath(current, nextPoint);
+                if (detour != nextPoint) { // If we found a valid detour
+                    waypoints.add(detour);
+                    current = detour;
+                } else {
+                    // Could not find detour, try a shorter segment
+                    nextPoint = current.add(direction.mult(spacing * 0.5f));
+                    if (!col.checkPath(current, nextPoint)) {
+                        waypoints.add(nextPoint);
+                        current = nextPoint;
+                    } else {
+                        // Unable to progress, break to avoid infinite loop
+                        break;
+                    }
                 }
-                
-                Data node = createTempNode(pos, pathType);
-                pathNodes.add(node);
-
-                // Connect to previous node
-                if (i > 0) {
-                    connectNodes(pathNodes.get(i - 1), node);
-                }
+            } else {
+                waypoints.add(nextPoint);
+                current = nextPoint;
+            }
+            attempts++;
+        }
+        
+        waypoints.add(end);
+        
+        // Convert waypoints to path nodes
+        for (Vector3f point : waypoints) {
+            Data node = createTempNode(point, pathType);
+            pathNodes.add(node);
+            
+            // Connect to previous node
+            if (pathNodes.size() > 1) {
+                connectNodes(pathNodes.get(pathNodes.size() - 2), node);
             }
         }
-        System.out.println("[CP] Pathway created");
+        
         return pathNodes;
     }
     

@@ -109,7 +109,7 @@ public class Main extends SimpleApplication {
     
     boolean debugMode = true;
     boolean debugPanelOpen = false;
-    boolean debugVis = true;
+    boolean debugVis = false;
     float boundingCheck = 1.5f;
     private Node gridDebugNode;
     
@@ -279,7 +279,7 @@ public class Main extends SimpleApplication {
     private void createInitialEntities() {
         createAgents(3);
         createBuildings(0);
-        createRnodes(1);
+        createRnodes(12);
         sim.refreshNameMap();
     }
     
@@ -2152,10 +2152,52 @@ public class Main extends SimpleApplication {
     	    }
     }
     
+ 
+    private void updateCulling() {
+        // Get camera position and direction
+        Vector3f cameraPosition = cam.getLocation();
+        Vector3f cameraDirection = cam.getDirection();
+        
+        // Configure culling parameters
+        float maxViewDistance = 150f; // Adjust based on your game's scale
+        float maxViewDistanceSquared = maxViewDistance * maxViewDistance;
+        float viewAngleThreshold = 0.5f; // Roughly 60 degrees field of view
+        
+        // Loop through all rNodes
+        for (Data rNode : sim.rNodes) {
+            Spatial model = rNode.getNote("spatial", SP);
+            if (model != null) {
+                Vector3f nodePosition = rNode.getPosition();
+                
+                // 1. First check: Distance-based culling (fast)
+                float distanceSquared = cameraPosition.distanceSquared(nodePosition);
+                if (distanceSquared > maxViewDistanceSquared) {
+                    // Too far away, cull it
+                    model.setCullHint(CullHint.Always);
+                    continue;
+                }
+                
+                // 2. Second check: Simple frustum culling using dot product
+                Vector3f directionToNode = nodePosition.subtract(cameraPosition).normalizeLocal();
+                float dotProduct = cameraDirection.dot(directionToNode);
+                
+                // If the node is behind the camera or outside the view angle
+                if (dotProduct < viewAngleThreshold) {
+                    model.setCullHint(CullHint.Always);
+                    continue;
+                }
+                
+                // Node is potentially visible
+                model.setCullHint(CullHint.Dynamic);
+            }
+        }
+    }
+    
     private void updateStorageVisual(Data entity) {
         // Iterate through all geometries in the model
     	ArrayList<Data> spots = entity.getNote("storagespots", DL);
     	HashMap<String,Integer> has = entity.getNote("has", DH);
+    	boolean isNodeCulled = entity.getNote("spatial", SP).getCullHint() == CullHint.Always;
     	for(Data spot : spots)
     	{
     		if (!spot.getNote("has",DH).isEmpty())
@@ -2174,9 +2216,11 @@ public class Main extends SimpleApplication {
    
     	                if(num<=amount)
     	                {
-    	                	visual.setCullHint(CullHint.Never);
+    	                	if (!isNodeCulled&&entity.hasNote("nestable")) {
+    	                         visual.setCullHint(CullHint.Never);
+    	                     }
     	                	List<Vector3f> points = getVisualPoints(visual,true);
-    	                	if(!points.isEmpty())
+    	                	if(!points.isEmpty()&&!entity.hasNote("speed"))
     	                	{
     	                	collisionGrid.addSolid(points, entity);
     	                	}
@@ -2185,7 +2229,7 @@ public class Main extends SimpleApplication {
     	                {
     	                    visual.setCullHint(CullHint.Always);  
     	                    List<Vector3f> points = getVisualPoints(visual,false);
-    	                	if(!points.isEmpty())
+    	                	if(!points.isEmpty()&&!entity.hasNote("speed"))
     	                	{
     	                	collisionGrid.removeSolid(points, entity);
     	                	}
@@ -2292,43 +2336,65 @@ public class Main extends SimpleApplication {
             addModelToScene(building, buildingsNode, building.getNote("type", S));
         }
     }
+
+    
     private void createRnodes(int count) {
         // Track which types we've used to ensure at least one of each
         Set<String> usedTypes = new HashSet<>();
         List<Data> placedNodes = new ArrayList<>();
+        HashMap<String, List<String>> nodeController = new HashMap<>();
+        HashMap<String, Integer> placeList = new HashMap<>();
         
         // First, place one of each type
         for (String type : gen.rNodeTypes) {
             Data rNode = gen.rNode(type);
-            if (placeNode(rNode, placedNodes, true)) {
+            String category = rNode.getNote("category", S);
+            if (placeNode(rNode, placedNodes, true,category,true)) {
                 usedTypes.add(type);
                 placedNodes.add(rNode);
+                nodeController.putIfAbsent(category,new ArrayList<>());
+                nodeController.get(category).add(type);
                 sim.store("rNodes", rNode);
                 addModelToScene(rNode, buildingsNode, rNode.getNote("type", S));
                 count--;
             }
         }
+        String[] categories = {"tree","nest","treefall","common","forage"};
+        Integer[] categoryAmts = {4,     1,     5,         50,       11,   };
         
-        // Then place the remaining nodes randomly
-        for (int i = 0; i < count; i++) {
-            int selector = r.nextInt(1,gen.rNodeTypes.length);
-            Data rNode = gen.rNode(gen.rNodeTypes[selector]);
-            
-            if (placeNode(rNode, placedNodes, false)) {
-                placedNodes.add(rNode);
-                sim.store("rNodes", rNode);
-                addModelToScene(rNode, buildingsNode, rNode.getNote("type", S));
-            } else {
-                // If we failed to place, try again
-                i--;
-            }
+        for(int i=0;i<categories.length;i++)
+        {
+        	List<String> types = nodeController.get(categories[i]);
+        	 for(int k=0;k<categoryAmts[i]-1;k++)
+        	 {
+        	 String selectedtype =types.get(r.nextInt(types.size()));
+        	 placeList.putIfAbsent(selectedtype, 0);
+        	 placeList.merge(selectedtype, 1, Integer::sum);
+        	 }
         }
+        
+        for(Entry<String, Integer> toPlace : placeList.entrySet())
+        {
+        for(int i=0;i<toPlace.getValue();i++)
+	        {
+	        Data rNode = gen.rNode(toPlace.getKey());
+	        String category = rNode.getNote("category", S);
+	        if(placeNode(rNode, placedNodes, true,category,false))
+		        {
+		        placedNodes.add(rNode);
+		        sim.store("rNodes", rNode);
+		        addModelToScene(rNode, buildingsNode, rNode.getNote("type", S));
+		        }
+	        }
+        }
+    
+        
     }
 
-    private boolean placeNode(Data node, List<Data> existingNodes, boolean isRequired) {
-       if(node.getNote("type", S).equals("tree"))
+    private boolean placeNode(Data node, List<Data> existingNodes, boolean isRequired, String category,boolean isFirst) {
+       if(category.equals("tree")&&isFirst)
        {
-    	   node.setPosition(new Vector3f(0f,0f,-20f));
+    	   node.setPosition(new Vector3f(0f,0f,0f));
     	   return true;
        }
        
@@ -2336,8 +2402,61 @@ public class Main extends SimpleApplication {
     	// Maximum attempts to place a node
         int maxAttempts = isRequired ? 100 : 20;
         float minDistance = 20f; // Minimum distance between nodes
-        float centerClearRadius = isNestable ? 80f : 10f; // Radius of clear zone in center
-        float maxAttemptRadius = isNestable ? 120f : 80f; // Maximum radius from center
+        float centerClearRadius = 10f; // Radius of clear zone in center
+        float maxAttemptRadius =  80f; // Maximum radius from center
+        float offsetX = 0;
+        float offsetZ = 0;
+        
+        switch(category)
+        {
+        case "nest":
+        	minDistance=60f;
+//        	centerClearRadius = 120f;
+//        	maxAttemptRadius = 200f;
+        	centerClearRadius = 60f;
+        	maxAttemptRadius = 100f;
+        break;
+        
+        case "tree":
+        	minDistance=100f;
+        	centerClearRadius = 0f;
+        	maxAttemptRadius = 200f;
+        break;
+        
+        case "treefall":
+        	Data selTree = null;
+        	for(Data tree : sim.rNodes)
+        	{
+        		if(tree.getNote("type",S).equals("tree")&&tree.getNote("connectcap",I)<3)
+        		{
+        		selTree = tree;
+        		selTree.setNote("connectcap", tree.getNote("connectcap",I)+1);
+        		break;
+        		}
+        	}
+        	offsetX = selTree.getPosition().getX();
+        	offsetZ = selTree.getPosition().getZ();
+        	minDistance=20f;
+        	centerClearRadius = 30f;
+        	maxAttemptRadius = 70f;
+        break;
+        
+        case "common":
+        	minDistance=20f;
+        	centerClearRadius = 50f;
+        	maxAttemptRadius = 200f;
+        break;
+        
+        case "forage":
+        	minDistance=40f;
+        	centerClearRadius = 100f;
+        	maxAttemptRadius =  200f;
+        break;
+        
+        default:
+        	System.out.println("[PN] Invalid category");
+        break;
+        }
         
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             // Generate position in a ring, avoiding the center
@@ -2345,9 +2464,9 @@ public class Main extends SimpleApplication {
             float radius = centerClearRadius + (r.nextFloat() * (maxAttemptRadius - centerClearRadius));
             
             Vector3f position = new Vector3f(
-                FastMath.cos(angle) * radius,
+                (FastMath.cos(angle) * radius)+offsetX,
                 0,
-                FastMath.sin(angle) * radius
+                (FastMath.sin(angle) * radius)+offsetZ
             );
             
             // Check if position is valid
@@ -2355,16 +2474,19 @@ public class Main extends SimpleApplication {
             
             // Check distance from other nodes
             for (Data existing : existingNodes) {
+            	if(category.equals("common")||category.equals("treefall")||existing.getNote("category", S).equals(category))
+            	{
                 Vector3f existingPos = existing.getPosition();
                 if (position.distance(existingPos) < minDistance) {
                     valid = false;
                     break;
                 }
+            	}
             }
             
             if(debugMode)
             {
-                Cylinder cylinder = new Cylinder(3,64,120f, 4f, false);
+                Cylinder cylinder = new Cylinder(3,64,200f, 4f, false);
 
                 Material guideMat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
                 guideMat.setColor("Color", new ColorRGBA(1, 0.5f, 0.5f, 0.5f));
@@ -2423,7 +2545,7 @@ public class Main extends SimpleApplication {
                 // Set position
                 Vector3f position = entity.getPosition();
                 Quaternion rotation = entity.getRotation();
-                //model.setLocalRotation(rotation);
+              //  model.setLocalRotation(rotation);
                 model.setLocalTranslation(position);
                 
                 model.setCullHint(CullHint.Never);
@@ -2436,7 +2558,7 @@ public class Main extends SimpleApplication {
                     addBuildingClickHandler(model, entity);
                     addSpots(entity,model);
                     
-                    if(debugVis)
+                    if(debugVis&&boundingCheck>2)
                     {
                     Vector3f buildingBox = entity.getNote("dimensions",V3);
                     float x = buildingBox.getX()/boundingCheck;
@@ -2695,6 +2817,8 @@ public class Main extends SimpleApplication {
 //    	runSlice();
       
     }
+    private float cullingUpdateInterval = 0.2f; // Update every 0.2 seconds
+    private float cullingTimer = 0;
     
     @Override
     public void simpleUpdate(float tpf) {
@@ -2716,6 +2840,12 @@ public class Main extends SimpleApplication {
                 	shouldRunNextSlice=true;
                 }
             }
+        }
+        
+        cullingTimer += tpf;
+        if (cullingTimer >= cullingUpdateInterval) {
+            updateCulling();
+            cullingTimer = 0;
         }
         
         if(shouldRunNextSlice) {
