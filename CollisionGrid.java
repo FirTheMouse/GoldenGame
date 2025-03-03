@@ -69,33 +69,42 @@ public class CollisionGrid {
         // Improved line check with better resolution and margin
         Vector3f dir = end.subtract(start);
         float distance = dir.length();
+        
+        // Early exit for very short paths
+        if (distance < 0.1f) {
+            return isSolid(start) || isSolid(end);
+        }
+        
         dir.normalizeLocal();
         
-        // Use smaller step size for more precise collision detection
-        float stepSize = cellSize * 0.5f; // Half cell size for better precision
-        int steps = (int)(distance / stepSize) + 1; // +1 to ensure we check the end point
+        // Adaptive step size - smaller steps for longer paths
+        float stepSize = Math.min(cellSize * 0.5f, distance / 10f);
+        int steps = Math.max(5, (int)(distance / stepSize));
         
         System.out.println(" [CP] Checking path from " + start + " to " + end + " with " + steps + " steps");
         
-        for (int i = 0; i < steps; i++) {
-            // Calculate current point along the path
-            Vector3f point = start.add(dir.mult(i * stepSize));
+        // Sample many points along the path
+        for (int i = 0; i <= steps; i++) {
+            float progress = i / (float)steps;
+            Vector3f point = start.clone().interpolateLocal(end, progress);
             
             if (isSolid(point)) {
                 System.out.println(" [CP] Solid intersection at step " + i + ": " + point);
                 return true; // Found collision
             }
             
-            // Optional: Check slightly to the sides for wider objects
-            Vector3f perpendicular = new Vector3f(-dir.z, 0, dir.x).normalizeLocal();
-            float margin = cellSize * 3f; // Adjust based on character width
-            
-            Vector3f sidePoint1 = point.add(perpendicular.mult(margin));
-            Vector3f sidePoint2 = point.add(perpendicular.mult(-margin));
-            
-            if (isSolid(sidePoint1) || isSolid(sidePoint2)) {
-                System.out.println(" [CP] Side collision detected at step " + i);
-                return true; // Found side collision
+            // Check wider for obstacles
+            if (i % 2 == 0) { // Only check every other step to save performance
+                Vector3f perpendicular = new Vector3f(-dir.z, 0, dir.x).normalizeLocal();
+                float margin = cellSize * 1f; // Adjust based on character width
+                
+                Vector3f sidePoint1 = point.add(perpendicular.mult(margin));
+                Vector3f sidePoint2 = point.add(perpendicular.mult(-margin));
+                
+                if (isSolid(sidePoint1) || isSolid(sidePoint2)) {
+                    System.out.println(" [CP] Side collision detected at step " + i);
+                    return true; // Found side collision
+                }
             }
         }
         
@@ -127,37 +136,39 @@ public class CollisionGrid {
     }
     
     public Vector3f findClearPath(Vector3f start, Vector3f end) {
-        // Simple implementation - try offset points until we find a clear one
         Vector3f dir = end.subtract(start);
         Vector3f perpendicular = new Vector3f(-dir.z, 0, dir.x).normalizeLocal();
-        System.out.println("   [FCP] Finding a clear path from "+start+" to "+end);
         
-        // Determine the total distance between start and end
-        float totalDistance = dir.length();
-        float stepBack = totalDistance / 10; // Divide path into segments
+        // Try different distances and angles
+        float[] distances = {0.25f, 0.5f, 0.75f, 0.9f}; // Fractions of total distance
+        float[] offsets = {cellSize, cellSize*2, cellSize*4, cellSize*8, cellSize*16};
         
-        for (float backDist = 0; backDist < totalDistance * 0.9f; backDist += stepBack) {
-            // Calculate a point that's moving backward from end toward start
+        for (float distFrac : distances) {
+            float backDist = dir.length() * distFrac;
             Vector3f backPoint = end.subtract(dir.normalize().mult(backDist));
             
-            for (float offset = cellSize; offset < cellSize * 30; offset += (cellSize/2)) {
-                // Try both sides of the path at this backward point
-                Vector3f tryPoint1 = backPoint.add(perpendicular.mult(offset));
-                Vector3f tryPoint2 = backPoint.add(perpendicular.mult(-offset));
-                
-                if (!isSolid(tryPoint1)) {
-                    System.out.println(" 	[FCP] Point 1 chosen at back distance "+backDist+" and offset "+offset);
-                    return tryPoint1;
-                }
-                if (!isSolid(tryPoint2)) {
-                    System.out.println(" 	[FCP] Point 2 chosen at back distance "+backDist+" and offset "+offset);
-                    return tryPoint2;
+            for (float offset : offsets) {
+                for (int sign : new int[]{1, -1}) { // Try both sides
+                    Vector3f tryPoint = backPoint.add(perpendicular.mult(offset * sign));
+                    if (!isSolid(tryPoint) && !checkPath(start, tryPoint)) {
+                        return tryPoint;
+                    }
                 }
             }
         }
         
-        System.out.println("Impossible pathing");
-        return end; // If we can't find a clear path, return original endpoint
+        // If all else fails, try to find any non-solid point near start
+        for (float offset : offsets) {
+            for (int sign : new int[]{1, -1}) {
+                Vector3f tryPoint = start.add(perpendicular.mult(offset * sign));
+                if (!isSolid(tryPoint)) {
+                    return tryPoint;
+                }
+            }
+        }
+        
+        System.out.println("Truly impossible pathing - no clear points found");
+        return start; // Return start instead of end as a fallback
     }
     
     public Node createDebugNode(AssetManager assetManager) {
